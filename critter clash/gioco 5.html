@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <title>Critter Clash</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: #f0f0f0;
+    }
+
+    h1 {
+      margin-top: 2vh;
+      margin-bottom: 2vh;
+      font-size: 3vw
+    }
+
+    .container {
+      margin-top: 5px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* Griglia 6x6 */
+    .board {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      grid-template-rows: repeat(6, 1fr);
+      width: 75vh;
+      height: 75vh;
+      gap: 0;
+      position: relative;
+    }
+
+    .cell {
+      background-color: #62ea62 ; /* colore sfondo scacchiera */
+      border: 1px solid #159e15;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      position: relative;
+    }
+
+    /* Pedine (background placeholders) */
+    .piece {
+      width: 80%;
+      height: 80%;
+      background-size: cover;
+      background-position: center;
+      cursor: pointer;
+    }
+
+    /* Rosse */
+    .red-elephant {
+      background-image: url('images/red_elephant.png');
+    }
+    .red-dog {
+      background-image: url('images/red_dog.png');
+    }
+    .red-cat {
+      background-image: url('images/red_cat.png');
+    }
+    .red-mouse {
+      background-image: url('images/red_mouse.png');
+    }
+
+    /* Blu */
+    .blue-elephant {
+      background-image: url('images/blue_elephant.png');
+    }
+    .blue-dog {
+      background-image: url('images/blue_dog.png');
+    }
+    .blue-cat {
+      background-image: url('images/blue_cat.png');
+    }
+    .blue-mouse {
+      background-image: url('images/blue_mouse.png');
+    }
+
+    /* Pulsanti per replay */
+    .controls {
+      margin-top: 2vh;
+      display: flex;
+      gap: 3vh;
+    }
+    button {
+      padding: 0.5vh 2vh;
+      font-size: 4vh;
+      cursor: pointer;
+      color: #808080;
+    }
+
+    #status {
+      margin-top: 2vh;
+      font-size: 1.7vw;
+      font-weight: bold;
+      color: #808080;
+    }
+    #victoryMessage {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 90%;
+      text-align: center;
+      font-size: 7vw;
+      font-weight: bold;
+      color: rgba(255, 255, 255, 0.6); /* Bianco con trasparenza al 50% */
+      font-family: 'Arial', sans-serif; /* Cambia qui il carattere */
+      z-index: 1000; /* Si assicura che sia sopra tutto */
+    }
+  </style>
+</head>
+<body>
+  <h1>Critter Clash</h1>
+  <div class="container">
+    <div class="board" id="board"></div>
+    <div id="victoryMessage" style="display: none;"></div>
+
+    <!-- Pulsanti per rivedere i turni -->
+    <div class="controls">
+      <div id="status"></div>
+      <button id="prevMove">◀</button>
+      <button id="nextMove">▶</button>
+      <button id="restartBtn">Nuova partita</button>
+    </div>
+
+  <script>
+    /************************************************************
+     * COSTANTI E STRUTTURE DATI
+     ************************************************************/
+    const BOARD_SIZE = 6;
+    const boardElement = document.getElementById('board');
+    const statusElement = document.getElementById('status');
+    const restartBtn = document.getElementById('restartBtn');
+    const prevMoveBtn = document.getElementById('prevMove');
+    const nextMoveBtn = document.getElementById('nextMove');
+
+    // Tipi di pedine disponibili
+    const ANIMAL_TYPES = ["elephant", "dog", "cat", "mouse"];
+    // Mappatura di chi cattura chi
+    // cat -> mouse, dog -> cat, elephant -> dog, mouse -> elephant
+    const captureMap = {
+      "cat": "mouse",
+      "dog": "cat",
+      "elephant": "dog",
+      "mouse": "elephant"
+    };
+
+    // Squadra rossa e squadra blu
+    const RED_TEAM = "red";
+    const BLUE_TEAM = "blue";
+
+    // Array per salvare lo stato di ogni mossa (per replay)
+    let gameHistory = [];
+    let currentMoveIndex = 0;
+
+    // Indica se la partita è terminata
+    let gameOver = false;
+
+    // Stato corrente delle pedine sul campo
+    // Ogni elemento è un oggetto: {
+    //   id: numero univoco,
+    //   team: "red" o "blue",
+    //   type: "elephant"/"dog"/"cat"/"mouse",
+    //   x: colonna,
+    //   y: riga
+    // }
+    let pieces = [];
+
+    // Tieni traccia di chi deve giocare
+    let currentPlayer = RED_TEAM; // Inizia la squadra rossa
+
+    /************************************************************
+     * FUNZIONI DI INIZIALIZZAZIONE
+     ************************************************************/
+    // Crea la griglia HTML (celle)
+    function createBoard() {
+      boardElement.innerHTML = ''; // Pulizia
+      for (let row = 0; row < BOARD_SIZE; row++) {
+        for (let col = 0; col < BOARD_SIZE; col++) {
+          const cell = document.createElement('div');
+          cell.classList.add('cell');
+          cell.dataset.row = row;
+          cell.dataset.col = col;
+          boardElement.appendChild(cell);
+        }
+      }
+    }
+
+    // Mescola array (Fisher-Yates)
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    // Inizializza le posizioni delle pedine
+    function initPieces() {
+      pieces = [];
+
+      // Le 4 pedine rosse partono sulla riga 0, colonne 1..4
+      // Le 4 pedine blu partono sulla riga 5, colonne 1..4
+      // Ordine casuale degli animali
+      let redAnimals = shuffle([...ANIMAL_TYPES]);  // [elephant, dog, cat, mouse] mischiati
+      let blueAnimals = shuffle([...ANIMAL_TYPES]);
+
+      // Righe e colonne di partenza
+      const redRow = 0;
+      const blueRow = 5;
+      const startCols = [1,2,3,4];  // no colonna 0 e 5 (angoli)
+      
+      // Assegna pedine rosse
+      startCols.forEach((col, index) => {
+        pieces.push({
+          id: `R${index}`,
+          team: RED_TEAM,
+          type: redAnimals[index],
+          x: col,
+          y: redRow
+        });
+      });
+
+      // Assegna pedine blu
+      startCols.forEach((col, index) => {
+        pieces.push({
+          id: `B${index}`,
+          team: BLUE_TEAM,
+          type: blueAnimals[index],
+          x: col,
+          y: blueRow
+        });
+      });
+    }
+
+    /************************************************************
+     * FUNZIONI DI DISEGNO E GESTIONE TURNI
+     ************************************************************/
+    // Disegna la griglia e le pedine
+    function renderBoard() {
+      // Svuota le celle da eventuali child
+      const cells = document.querySelectorAll('.cell');
+      cells.forEach(cell => {
+        cell.innerHTML = '';
+      });
+
+      // Posiziona le pedine
+      pieces.forEach(piece => {
+        const { x, y, team, type } = piece;
+        const cell = document.querySelector(`.cell[data-row='${y}'][data-col='${x}']`);
+        if (cell) {
+          const pieceDiv = document.createElement('div');
+          pieceDiv.classList.add('piece');
+          pieceDiv.classList.add(`${team}-${type}`); 
+          // Salviamo qualche info utile
+          pieceDiv.dataset.id = piece.id;
+          pieceDiv.dataset.team = team;
+          pieceDiv.dataset.type = type;
+          cell.appendChild(pieceDiv);
+        }
+      });
+
+      // Aggiorna lo status
+      if (!gameOver) {
+        statusElement.textContent = `Turno: ${currentPlayer === RED_TEAM ? 'Arancione' : 'Giallo'}`;
+      }
+    }
+
+    // Salva lo stato corrente delle pedine e del giocatore
+    function saveGameState() {
+      const snapshot = {
+        pieces: JSON.parse(JSON.stringify(pieces)),
+        currentPlayer: currentPlayer,
+        gameOver: gameOver
+      };
+      // Se stiamo rivedendo la partita in un punto precedente
+      // e facciamo una nuova mossa, tronchiamo la cronologia successiva
+      if (currentMoveIndex < gameHistory.length - 1) {
+        gameHistory = gameHistory.slice(0, currentMoveIndex + 1);
+      }
+      gameHistory.push(snapshot);
+      currentMoveIndex = gameHistory.length - 1;
+    }
+
+    // Ripristina uno stato di gioco dalla cronologia
+    function restoreGameState(index) {
+      if (index < 0 || index >= gameHistory.length) return;
+      const snapshot = gameHistory[index];
+      pieces = JSON.parse(JSON.stringify(snapshot.pieces));
+      currentPlayer = snapshot.currentPlayer;
+      gameOver = snapshot.gameOver;
+      currentMoveIndex = index;
+      renderBoard();
+    }
+
+    /************************************************************
+     * LOGICA DI MOVIMENTO
+     ************************************************************/
+    // Verifica se un movimento è valido (1 casella in ogni direzione)
+    function isValidMove(fromX, fromY, toX, toY) {
+      const dx = Math.abs(toX - fromX);
+      const dy = Math.abs(toY - fromY);
+      // Deve stare dentro la scacchiera
+      if (toX < 0 || toX >= BOARD_SIZE || toY < 0 || toY >= BOARD_SIZE) return false;
+      // Deve muoversi di almeno una casella e al massimo di una casella
+      // in orizzontale, verticale o diagonale
+      if ((dx <= 1 && dy <= 1) && (dx + dy !== 0)) {
+        return true;
+      }
+      return false;
+    }
+
+    // Verifica se può catturare (ortogonalmente adiacente) e se il tipo è corretto
+    function canCapture(mover, target) {
+      // Controlliamo se il mover può catturare il target
+      // e se la distanza è 1 in orizzontale/verticale
+      if (captureMap[mover.type] === target.type) {
+        const dx = Math.abs(mover.x - target.x);
+        const dy = Math.abs(mover.y - target.y);
+        // Per catturare: dx + dy == 1 -> ortogonale
+        if ((dx + dy) === 1) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // Sposta la pedina e passa il turno
+    function movePiece(pieceId, toX, toY) {
+      const piece = pieces.find(p => p.id === pieceId);
+      if (!piece) return;
+
+      // Controlla se il movimento è valido
+      if (!isValidMove(piece.x, piece.y, toX, toY)) {
+        return; // movimento non valido
+      }
+
+      // Controlla se quella cella è già occupata da una pedina alleata
+      // (non possiamo spostarci lì)
+      const occupant = pieces.find(p => p.x === toX && p.y === toY);
+      if (occupant && occupant.team === piece.team) {
+        return; // non possiamo muoverci in una cella occupata da un alleato
+      }
+
+      // Spostiamo
+      piece.x = toX;
+      piece.y = toY;
+
+      // Controlliamo se possiamo catturare qualcuno
+      // Cerchiamo una pedina avversaria che si possa catturare
+      for (let i = 0; i < pieces.length; i++) {
+        const other = pieces[i];
+        if (other.team !== piece.team) {
+          if (canCapture(piece, other)) {
+            // Cattura avvenuta!
+            gameOver = true;
+
+            // Salva lo stato e aggiorna la board PRIMA di mostrare il messaggio di vittoria
+            saveGameState();
+            renderBoard();
+
+            // Aspetta un momento per mostrare la mossa vincente, poi mostra il messaggio
+            setTimeout(() => {
+              const winner = piece.team === RED_TEAM ? 'Arancione' : 'Giallo';
+              statusElement.textContent = `Vince: ${winner}!`;
+
+              // Mostra il messaggio di vittoria
+              const victoryMessage = document.getElementById('victoryMessage');
+              victoryMessage.textContent = 'VITTORIA';
+              victoryMessage.style.display = 'block';
+
+              // Nasconde il messaggio di vittoria al clic in qualsiasi punto
+              document.body.addEventListener('click', () => {
+                const victoryMessage = document.getElementById('victoryMessage');
+                victoryMessage.style.display = 'none';
+              });
+
+              restartBtn.style.display = 'inline-block';
+            }, 500);
+
+            break;
+          }
+        }
+      }
+
+      // Se la partita non è finita, passa al giocatore successivo
+      if (!gameOver) {
+        currentPlayer = currentPlayer === RED_TEAM ? BLUE_TEAM : RED_TEAM;
+
+      // Salviamo lo stato
+      saveGameState();
+      renderBoard();
+      }
+    }
+
+    /************************************************************
+     * INTERAZIONE CON L'UTENTE
+     ************************************************************/
+    // Ascoltiamo i click sulla griglia per selezionare e muovere pedine
+    let selectedPieceId = null;
+
+    boardElement.addEventListener('click', (e) => {
+      if (gameOver) return; // se la partita è finita, ignora
+
+      const cell = e.target.closest('.cell');
+      if (!cell) return;
+
+      const row = parseInt(cell.dataset.row);
+      const col = parseInt(cell.dataset.col);
+
+      // Se clicco su una pedina
+      if (e.target.classList.contains('piece')) {
+        const pieceId = e.target.dataset.id;
+        const pieceTeam = e.target.dataset.team;
+
+        // Se appartiene al giocatore corrente, la seleziono
+        if (pieceTeam === currentPlayer) {
+          selectedPieceId = pieceId;
+        }
+      } else {
+        // Se ho una pedina selezionata, tento di muoverla qui
+        if (selectedPieceId) {
+          movePiece(selectedPieceId, col, row);
+          selectedPieceId = null;
+        }
+      }
+    });
+
+    // Pulsante per riavviare il gioco
+    restartBtn.addEventListener('click', () => {
+      startNewGame();
+    });
+
+    // Frecce per la cronologia
+    prevMoveBtn.addEventListener('click', () => {
+      if (currentMoveIndex > 0) {
+        restoreGameState(currentMoveIndex - 1);
+      }
+    });
+
+    nextMoveBtn.addEventListener('click', () => {
+      if (currentMoveIndex < gameHistory.length - 1) {
+        restoreGameState(currentMoveIndex + 1);
+      }
+    });
+
+    /************************************************************
+     * AVVIO DEL GIOCO
+     ************************************************************/
+    function startNewGame() {
+      // Resetta lo stato
+      currentPlayer = BLUE_TEAM;
+      gameOver = false;
+      statusElement.textContent = '';
+
+      // Crea la board + posiziona pedine
+      createBoard();
+      initPieces();
+
+      // Svuota cronologia
+      gameHistory = [];
+      currentMoveIndex = -1;
+
+      // Salva e mostra stato iniziale
+      saveGameState();
+      renderBoard();
+    }
+
+    // Inizializza il gioco alla prima apertura
+    startNewGame();
+  </script>
+</body>
+</html>
